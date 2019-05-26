@@ -1,3 +1,6 @@
+import random
+from datetime import datetime
+
 EMPTY = 0
 PAWN = 1
 ROOKE = 2
@@ -8,6 +11,7 @@ KING = 6
 
 class Board():
     def __init__(self):
+        random.seed(datetime.now())
         self.squares = []
         for i in range(0, 8):
             self.squares.append([])
@@ -386,6 +390,15 @@ class Board():
 
         return self.inCheck(tempSquares, white)
 
+    def isMate(self, white):
+        for i in range(0, 8):
+            for j in range(0, 8):
+                if self.isAlly(i, j, white):
+                    moves = self.getPotentialMoves(i, j)
+                    if len(moves) > 0:
+                        return False
+        return True
+
     def move(self, x, y, nx, ny):
         self.enPassant = [-1, -1]
         if self.squares[x][y] == PAWN or self.squares[x][y] == PAWN + 6:
@@ -422,6 +435,145 @@ class Board():
                 if move == (x, y):
                     self.move(self.pieceToMove[0], self.pieceToMove[1], x, y)
                     self.turn = not self.turn
+                    if self.inCheck(self.squares, self.turn) and self.isMate(self.turn):
+                        print("Checkmate")
+                    elif self.isMate(self.turn) and not self.inCheck(self.squares, self.turn):
+                        print("Stalemate")
+                    if self.turn == False:
+                        bestMove = self.chooseMove(False)
+                        self.move(bestMove[0], bestMove[1], bestMove[2], bestMove[3])
+                        self.turn = not self.turn
+                    if self.inCheck(self.squares, self.turn) and self.isMate(self.turn):
+                        print("Checkmate")
+                    elif self.isMate(self.turn) and not self.inCheck(self.squares, self.turn):
+                        print("Stalemate")
                     break
             self.potentialMoves = []
 
+    def chooseMove(self, white):
+        pieces = []
+        moves = []
+        scores = []
+        for i in range(0, 8):
+            for j in range(0, 8):
+                if self.isAlly(i, j, white):
+                    potMoves = self.getPotentialMoves(i, j)
+                    for move in potMoves:
+                        pieces.append((i, j))
+                        moves.append(move)
+                        scores.append(0)
+        for i in range(0, len(pieces)):
+            scores[i] = self.considerMove(pieces[i], moves[i], white)
+
+        bestMoves = []
+        highScore = -100
+        for score in scores:
+            if score > highScore:
+                highScore = score
+        for i in range(0, len(pieces)):
+            if scores[i] == highScore:
+                bestMoves.append((pieces[i][0], pieces[i][1], moves[i][0], moves[i][1]))
+
+        return random.choice(bestMoves)
+
+    def considerMove(self, piece, move, white):
+        tempSquares = []
+        for i in range(0, 8):
+            tempSquares.append([])
+            for j in range(0, 8):
+                tempSquares[i].append(self.squares[i][j])
+        self.move(piece[0], piece[1], move[0], move[1])
+        score = self.quantify(white)
+        for i in range(0, 8):
+            for j in range(0, 8):
+                self.squares[i][j] = tempSquares[i][j]
+        return score
+
+    def quantify(self, white):
+        score = 0.0
+        score += self.getPieceScore(white)
+        score += (39 - self.getPieceScore(not white))
+        selfControlled = self.getSquaresControlled(white)
+        enemyControlled = self.getSquaresControlled(not white)
+
+        for square in selfControlled:
+            score += 0.5
+            if (white and square[1] < 6) or (white and square[1] > 1):
+                score += 0.5
+            if (white and square[1] < 4) or (not white and square[1] > 3):
+                score += 0.5
+            if (white and square[1] < 2) or (not white and square[1] > 5):
+                score += 0.5
+            if self.isEnemy(square[0], square[1], white):
+                i = square[0]
+                j = square[1]
+                if self.squares[i][j] == PAWN or self.squares[i][j] == PAWN + 6:
+                    score += 0.5
+                if self.squares[i][j] == KNIGHT or self.squares[i][j] == KNIGHT + 6:
+                    score += 2
+                if self.squares[i][j] == ROOKE or self.squares[i][j] == ROOKE + 6:
+                    score += 4
+                if self.squares[i][j] == BISHOP or self.squares[i][j] == BISHOP + 6:
+                    score += 2
+                if self.squares[i][j] == QUEEN or self.squares[i][j] == QUEEN + 6:
+                    score += 8
+                if self.squares[i][j] == KING or self.squares[i][j] == KING + 6:
+                    score += 12
+        for square in enemyControlled:
+            score -= 1
+            if (white and square[1] < 6) or (white and square[1] > 1):
+                score -= 1
+            if (white and square[1] < 4) or (not white and square[1] > 3):
+                score -= 1
+            if (white and square[1] < 2) or (not white and square[1] > 5):
+                score -= 1
+            if self.isAlly(square[0], square[1], white):
+                i = square[0]
+                j = square[1]
+                if self.squares[i][j] == PAWN or self.squares[i][j] == PAWN + 6:
+                    score -= 1.5
+                if self.squares[i][j] == KNIGHT or self.squares[i][j] == KNIGHT + 6:
+                    score -= 4
+                if self.squares[i][j] == ROOKE or self.squares[i][j] == ROOKE + 6:
+                    score -= 6
+                if self.squares[i][j] == BISHOP or self.squares[i][j] == BISHOP + 6:
+                    score -= 4
+                if self.squares[i][j] == QUEEN or self.squares[i][j] == QUEEN + 6:
+                    score -= 10
+
+        return score
+
+
+    def getSquaresControlled(self, white):
+        controlled = []
+        for i in range(0, 8):
+            for j in range(0, 8):
+                if self.isAlly(i, j, white):
+                    moves = self.getPotentialMoves(i, j)
+                    for move in moves:
+                        if self.squares[i][j] == PAWN or self.squares[i][j] == PAWN + 6:
+                            if move[0] == i:
+                                continue
+                        if self.squares[i][j] == KING or self.squares[i][j] == KING + 6:
+                            if abs(move[0] - i) == 2:
+                                continue
+                        controlled.append(move)
+
+        return controlled
+
+    def getPieceScore(self, white):
+        score = 0
+        for i in range(0, 8):
+            for j in range(0, 8):
+                if self.isAlly(i, j, white):
+                    if self.squares[i][j] == PAWN or self.squares[i][j] == PAWN + 6:
+                        score += 1
+                    if self.squares[i][j] == KNIGHT or self.squares[i][j] == KNIGHT + 6:
+                        score += 3
+                    if self.squares[i][j] == ROOKE or self.squares[i][j] == ROOKE + 6:
+                        score += 5
+                    if self.squares[i][j] == BISHOP or self.squares[i][j] == BISHOP + 6:
+                        score += 3
+                    if self.squares[i][j] == QUEEN or self.squares[i][j] == QUEEN + 6:
+                        score += 9
+        return score
