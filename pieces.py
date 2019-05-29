@@ -500,6 +500,10 @@ class Board():
         return score
 
     def quantify(self, white):
+
+        if self.isMate(not white):
+            return 1000000
+
         score = 0.0
         score += self.getPieceScore(white)
         score += (39 - self.getPieceScore(not white))
