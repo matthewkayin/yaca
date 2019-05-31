@@ -1,4 +1,5 @@
 import pygame
+import sys
 from pieces import Board
 
 SCREEN_WIDTH = 512
@@ -17,7 +18,7 @@ spritesheet = pygame.transform.scale(spritesheet, (384, 128))
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 clock = pygame.time.Clock()
-board = Board()
+board = Board(sys.argv)
 
 def renderPiece(piece):
     subimageY = 0
@@ -43,6 +44,7 @@ while running:
     for piece in board.getPieces():
         renderPiece(piece)
     pygame.display.flip()
+    board.blackMove()
     for event in pygame.event.get():
         if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             running = False

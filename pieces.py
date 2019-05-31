@@ -10,7 +10,7 @@ QUEEN = 5
 KING = 6
 
 class Board():
-    def __init__(self):
+    def __init__(self, arguments):
         random.seed(datetime.now())
         self.squares = []
         for i in range(0, 8):
@@ -23,6 +23,11 @@ class Board():
         self.turnCount = 1
         self.pieceToMove = (-1, -1)
         self.potentialMoves = []
+        self.gameover = False
+        self.fakeMoveStack = []
+        self.verbose = False
+        self.depth = 1
+        self.parseArgs(arguments)
         for i in range(0, 8):
             self.squares[i][1] = PAWN
             self.squares[i][6] = PAWN + 6
@@ -46,6 +51,14 @@ class Board():
         self.squares[3][7] = QUEEN + 6
         self.squares[4][0] = KING
         self.squares[4][7] = KING + 6
+
+    def parseArgs(self, args):
+        for arg in args:
+            if arg.startswith("-depth="):
+                index = arg.index("=")
+                self.depth = int(arg[(index+1):])
+            elif arg == "-verbose" or arg == "-v":
+                self.verbose = True
 
     def getPieces(self):
         pieces = []
@@ -431,7 +444,43 @@ class Board():
         elif self.squares[nx][ny] == PAWN + 6 and ny == 0:
             self.squares[nx][ny] = QUEEN + 6
 
+    def fakeMove(self, x, y, nx, ny):
+        entry = []
+        entry.append((x, y, self.squares[x][y]))
+        entry.append((nx, ny, self.squares[nx][ny]))
+        if abs(x - nx) == 2 and (self.squares[x][y] == KING or self.squares[x][y] == KING + 6):
+            rookeOldX = 0
+            direction = -1
+            if nx - x > 0:
+                rookeOldX = 7
+                direction = 1
+            entry.append((rookeOldX, y, self.squares[rookeOldX][y]))
+            entry.append((x + direction, y, EMPTY))
+        elif abs(x - nx) == 1 and (self.squares[x][y] == PAWN or self.squares[x][y] == PAWN + 6):
+            entry.append((nx, y, self.squares[nx][y]))
+        entry.append((self.enPassant[0], self.enPassant[1]))
+        entry.append((self.canCastle[0][0], self.canCastle[0][1], self.canCastle[1][0], self.canCastle[1][1]))
+        self.fakeMoveStack.append(entry)
+
+        self.move(x, y, nx, ny)
+
+    def undoFakeMove(self):
+        entry = self.fakeMoveStack.pop()
+        for undo in entry:
+            if len(undo) == 2:
+                self.enPassant[0] = undo[0]
+                self.enPassant[1] = undo[1]
+            elif len(undo) == 3:
+                self.squares[undo[0]][undo[1]] = undo[2]
+            elif len(undo) == 4:
+                self.canCastle[0][0] = undo[0]
+                self.canCastle[0][1] = undo[1]
+                self.canCastle[1][0] = undo[2]
+                self.canCastle[1][1] = undo[3]
+
     def click(self, x, y):
+        if self.gameover:
+            return
         if self.isAlly(x, y, self.turn):
             self.potentialMoves = self.getPotentialMoves(x, y)
             self.pieceToMove = (x, y)
@@ -443,25 +492,34 @@ class Board():
                     self.turnCount += 1
                     if self.inCheck(self.squares, self.turn) and self.isMate(self.turn):
                         print("Checkmate")
+                        self.gameover = True
                     elif self.isMate(self.turn) and not self.inCheck(self.squares, self.turn):
                         print("Stalemate")
-                    if self.turn == False:
-                        bestMove = self.chooseMove(False)
-                        if bestMove[0] != -1:
-                            self.move(bestMove[0], bestMove[1], bestMove[2], bestMove[3])
-                        self.turn = not self.turn
-                        self.turnCount += 1
-                    if self.inCheck(self.squares, self.turn) and self.isMate(self.turn):
-                        print("Checkmate")
-                    elif self.isMate(self.turn) and not self.inCheck(self.squares, self.turn):
-                        print("Stalemate")
+                        self.gameover = True
                     break
             self.potentialMoves = []
 
-    def chooseMove(self, white):
+    def blackMove(self):
+        if self.gameover:
+            return
+        if self.turn == False:
+            bestMove = self.chooseMove(False, self.depth)
+            if bestMove[0] != -1:
+                self.move(bestMove[0], bestMove[1], bestMove[2], bestMove[3])
+            self.turn = not self.turn
+            self.turnCount += 1
+        if self.inCheck(self.squares, self.turn) and self.isMate(self.turn):
+            print("Checkmate")
+            self.gameover = True
+        elif self.isMate(self.turn) and not self.inCheck(self.squares, self.turn):
+            print("Stalemate")
+            self.gameover = True
+
+    def chooseMove(self, white, depth):
         pieces = []
         moves = []
         scores = []
+        best = []
         for i in range(0, 8):
             for j in range(0, 8):
                 if self.isAlly(i, j, white):
@@ -471,7 +529,7 @@ class Board():
                         moves.append(move)
                         scores.append(0)
         for i in range(0, len(pieces)):
-            scores[i] = self.considerMove(pieces[i], moves[i], white)
+            scores[i] = self.considerMove(pieces[i], moves[i], white, depth)
 
         bestMoves = []
         highScore = -100
@@ -486,17 +544,28 @@ class Board():
             return (-1, -1, -1, -1)
         return random.choice(bestMoves)
 
-    def considerMove(self, piece, move, white):
-        tempSquares = []
-        for i in range(0, 8):
-            tempSquares.append([])
-            for j in range(0, 8):
-                tempSquares[i].append(self.squares[i][j])
-        self.move(piece[0], piece[1], move[0], move[1])
-        score = self.quantify(white)
-        for i in range(0, 8):
-            for j in range(0, 8):
-                self.squares[i][j] = tempSquares[i][j]
+    def considerMove(self, piece, move, white, depth):
+        self.fakeMove(piece[0], piece[1], move[0], move[1])
+        score = 0
+
+        if depth == 1:
+            score = self.quantify(white)
+        else:
+            whiteMove = self.chooseMove(not white, 1)
+            self.fakeMove(whiteMove[0], whiteMove[1], whiteMove[2], whiteMove[3])
+            highScore = -100
+            for i in range(0, 8):
+                for j in range(0, 8):
+                    if self.isAlly(i, j, white):
+                        potMoves = self.getPotentialMoves(i, j)
+                        for pMove in potMoves:
+                            theScore = self.considerMove((i, j), pMove, white, depth - 1)
+                            if theScore > highScore:
+                                highScore = theScore
+            score = highScore
+            self.undoFakeMove()
+
+        self.undoFakeMove()
         return score
 
     def quantify(self, white):
